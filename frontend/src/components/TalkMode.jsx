@@ -13,7 +13,17 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
   const recognitionRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const synthRef = useRef(null)
-  const continuousRef = useRef(false) // ref so async callbacks always see latest value
+  const continuousRef = useRef(false)
+  const orbStateRef = useRef('idle')   // mirrors orbState for use inside async callbacks
+  const messagesRef = useRef(messages) // mirrors messages to avoid stale closures
+
+  // Keep messagesRef in sync with messages prop
+  useEffect(() => { messagesRef.current = messages }, [messages])
+
+  const setOrb = (state) => {
+    orbStateRef.current = state
+    setOrb(state)
+  }
 
   // Cleanup on unmount (user switches mode)
   useEffect(() => {
@@ -35,8 +45,8 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       }
       setMessages([welcome])
       setLastReply(welcome)
-      speakText(welcome.content, () => setOrbState('idle'))
-      setOrbState('speaking')
+      speakText(welcome.content, () => setOrb('idle'))
+      setOrb('speaking')
     }
   }, [])
 
@@ -68,23 +78,28 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       setTranscript(t)
       if (e.results[e.results.length - 1].isFinal) {
         setTranscript('')
-        setOrbState('thinking')
+        setOrb('thinking')
         sendToAPI(t)
       }
     }
     r.onerror = () => {
       setTranscript('')
-      if (continuousRef.current) setOrbState('listening')
-      else setOrbState('idle')
+      if (continuousRef.current) startWebSpeech()
+      else setOrb('idle')
     }
     r.onend = () => {
-      // only reset to idle if not in continuous mode and not already processing
-      if (!continuousRef.current) setOrbState('idle')
+      // If still in listening state (recognition timed out with no speech), restart
+      if (continuousRef.current && orbStateRef.current === 'listening') {
+        startWebSpeech()
+      } else if (!continuousRef.current && orbStateRef.current === 'listening') {
+        setOrb('idle')
+      }
+      // If orbState is thinking/speaking, sendToAPI is handling the flow — do nothing
     }
     recognitionRef.current = r
     r.start()
     setSttMode('webspeech')
-    setOrbState('listening')
+    setOrb('listening')
   }
 
   // --- Groq Whisper (fallback) ---
@@ -101,7 +116,7 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
         const blob = new Blob(chunks, { type: mimeType })
         const formData = new FormData()
         formData.append('audio', blob, 'recording.webm')
-        setOrbState('thinking')
+        setOrb('thinking')
         setTranscript('')
         try {
           const res = await fetch(`${API_URL}/api/transcribe`, { method: 'POST', body: formData })
@@ -109,18 +124,18 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
           const data = await res.json()
           if (data.text) sendToAPI(data.text)
           else if (continuousRef.current) startWhisper()
-          else setOrbState('idle')
+          else setOrb('idle')
         } catch {
           if (continuousRef.current) startWhisper()
-          else setOrbState('idle')
+          else setOrb('idle')
         }
       }
       mediaRecorderRef.current = recorder
       recorder.start()
       setSttMode('whisper')
-      setOrbState('listening')
+      setOrb('listening')
     } catch {
-      setOrbState('idle')
+      setOrb('idle')
     }
   }
 
@@ -137,12 +152,13 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
     recognitionRef.current?.stop()
     mediaRecorderRef.current?.stop()
     setSttMode(null)
-    setOrbState('idle')
+    setOrb('idle')
   }
 
   const sendToAPI = async (text) => {
+    const current = messagesRef.current
     const userMsg = { role: 'user', content: text }
-    const updated = [...messages, userMsg]
+    const updated = [...current, userMsg]
     setMessages(updated)
 
     try {
@@ -153,7 +169,7 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
           message: text,
           scenario,
           difficulty,
-          history: messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
+          history: current.slice(-20).map((m) => ({ role: m.role, content: m.content })),
         }),
       })
       if (!res.ok) throw new Error()
@@ -169,14 +185,14 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       setLastReply(aiMsg)
       onAIResponse(data)
 
-      setOrbState('speaking')
+      setOrb('speaking')
       speakText(data.reply, () => {
         if (continuousRef.current) {
           // resume listening automatically after AI finishes speaking
           const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition)
           hasWebSpeech ? startWebSpeech() : startWhisper()
         } else {
-          setOrbState('idle')
+          setOrb('idle')
         }
       })
     } catch {
@@ -184,7 +200,7 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       setMessages([...updated, err])
       setLastReply(err)
       if (continuousRef.current) startWebSpeech()
-      else setOrbState('idle')
+      else setOrb('idle')
     }
   }
 
@@ -240,7 +256,7 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
           <p className="orb-reply-zh">{lastReply.content}</p>
           <p className="orb-reply-py">{lastReply.pinyin}</p>
           <p className="orb-reply-en">{lastReply.translation}</p>
-          <button className="orb-replay" onClick={() => { setOrbState('speaking'); speakText(lastReply.content, () => setOrbState('idle')) }}>
+          <button className="orb-replay" onClick={() => { setOrb('speaking'); speakText(lastReply.content, () => setOrb('idle')) }}>
             🔊 Replay
           </button>
         </div>
