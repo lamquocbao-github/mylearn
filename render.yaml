@@ -3,8 +3,8 @@ services:
     name: mylearn-backend
     runtime: python
     rootDir: backend
-    buildCommand: python3 -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt
-    startCommand: /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: python3 -m venv venv && venv/bin/pip install -r requirements.txt
+    startCommand: venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT
     disk:
       name: mylearn-data
       mountPath: /data
