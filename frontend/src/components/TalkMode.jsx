@@ -59,28 +59,51 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
   // --- Web Speech API (primary) ---
   const startWebSpeech = () => {
     speechSynthesis.cancel()
+
+    // Abort any existing session cleanly before creating a new one
+    try { recognitionRef.current?.abort() } catch {}
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const r = new SR()
     r.lang = 'zh-CN'
     r.interimResults = true
+    r.continuous = true  // keep session alive; we stop it manually when speech is detected
+
+    let lastProcessed = 0  // track which results we've already sent to API
+
     r.onresult = (e) => {
-      const t = Array.from(e.results).map((r) => r[0].transcript).join('')
-      setTranscript(t)
-      if (e.results[e.results.length - 1].isFinal) {
+      let interim = ''
+      let final = ''
+      for (let i = lastProcessed; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          final += e.results[i][0].transcript
+          lastProcessed = i + 1
+        } else {
+          interim += e.results[i][0].transcript
+        }
+      }
+      if (interim) setTranscript(interim)
+      if (final.trim()) {
         setTranscript('')
+        r.abort()  // stop capturing while AI thinks/speaks
         setOrbState('thinking')
-        sendToAPI(t)
+        sendToAPI(final.trim())
       }
     }
-    r.onerror = () => {
+
+    r.onerror = (e) => {
       setTranscript('')
-      if (continuousRef.current) setOrbState('listening')
+      // 'aborted' is expected when we call r.abort() — don't treat it as an error
+      if (e.error === 'aborted') return
+      if (continuousRef.current) setTimeout(() => startWebSpeech(), 300)
       else setOrbState('idle')
     }
+
     r.onend = () => {
-      // only reset to idle if not in continuous mode and not already processing
       if (!continuousRef.current) setOrbState('idle')
+      // if continuous, the restart is handled by sendToAPI after AI finishes speaking
     }
+
     recognitionRef.current = r
     r.start()
     setSttMode('webspeech')
@@ -172,9 +195,12 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       setOrbState('speaking')
       speakText(data.reply, () => {
         if (continuousRef.current) {
-          // resume listening automatically after AI finishes speaking
-          const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition)
-          hasWebSpeech ? startWebSpeech() : startWhisper()
+          // short delay lets Chrome fully release the audio pipeline before restarting
+          setTimeout(() => {
+            if (!continuousRef.current) return
+            const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+            hasWebSpeech ? startWebSpeech() : startWhisper()
+          }, 300)
         } else {
           setOrbState('idle')
         }
