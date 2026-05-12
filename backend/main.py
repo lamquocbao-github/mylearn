@@ -86,7 +86,7 @@ DIFFICULTY_PROMPTS = {
     "beginner": """DIFFICULTY: Beginner (HSK 1-2 standard, ~300 active words)
 - Use only the most basic, high-frequency vocabulary
 - Keep sentences very short and simple (max 8 words per sentence)
-- Always include pinyin for every Chinese character in your reply
+- The reply field must contain ONLY Chinese characters — never mix in pinyin or English; pinyin goes in the pinyin field
 - Stick to familiar topics: greetings, numbers, family, food, time, directions
 - Be very patient and encouraging; repeat or rephrase if needed""",
 

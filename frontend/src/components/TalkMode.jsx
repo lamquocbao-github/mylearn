@@ -8,9 +8,21 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
   const [transcript, setTranscript] = useState('')
   const [lastReply, setLastReply] = useState(null)
   const [sttMode, setSttMode] = useState(null) // 'webspeech' | 'whisper' | null
+  const [continuous, setContinuous] = useState(false)
+
   const recognitionRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const synthRef = useRef(null)
+  const continuousRef = useRef(false) // ref so async callbacks always see latest value
+
+  // Cleanup on unmount (user switches mode)
+  useEffect(() => {
+    return () => {
+      continuousRef.current = false
+      recognitionRef.current?.stop()
+      speechSynthesis.cancel()
+    }
+  }, [])
 
   // Show welcome on first load
   useEffect(() => {
@@ -60,8 +72,15 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
         sendToAPI(t)
       }
     }
-    r.onerror = () => { setOrbState('idle'); setTranscript('') }
-    r.onend = () => { if (orbState === 'listening') setOrbState('idle') }
+    r.onerror = () => {
+      setTranscript('')
+      if (continuousRef.current) setOrbState('listening')
+      else setOrbState('idle')
+    }
+    r.onend = () => {
+      // only reset to idle if not in continuous mode and not already processing
+      if (!continuousRef.current) setOrbState('idle')
+    }
     recognitionRef.current = r
     r.start()
     setSttMode('webspeech')
@@ -89,9 +108,11 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
           if (!res.ok) throw new Error()
           const data = await res.json()
           if (data.text) sendToAPI(data.text)
+          else if (continuousRef.current) startWhisper()
           else setOrbState('idle')
         } catch {
-          setOrbState('idle')
+          if (continuousRef.current) startWhisper()
+          else setOrbState('idle')
         }
       }
       mediaRecorderRef.current = recorder
@@ -104,19 +125,19 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
   }
 
   const startListening = () => {
+    continuousRef.current = true
+    setContinuous(true)
     const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition)
     hasWebSpeech ? startWebSpeech() : startWhisper()
   }
 
   const stopListening = () => {
-    if (sttMode === 'webspeech') {
-      recognitionRef.current?.stop()
-      setOrbState('idle')
-    } else if (sttMode === 'whisper') {
-      // stopping the recorder triggers onstop → transcribe → sendToAPI
-      mediaRecorderRef.current?.stop()
-    }
+    continuousRef.current = false
+    setContinuous(false)
+    recognitionRef.current?.stop()
+    mediaRecorderRef.current?.stop()
     setSttMode(null)
+    setOrbState('idle')
   }
 
   const sendToAPI = async (text) => {
@@ -149,19 +170,31 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
       onAIResponse(data)
 
       setOrbState('speaking')
-      speakText(data.reply, () => setOrbState('idle'))
+      speakText(data.reply, () => {
+        if (continuousRef.current) {
+          // resume listening automatically after AI finishes speaking
+          const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+          hasWebSpeech ? startWebSpeech() : startWhisper()
+        } else {
+          setOrbState('idle')
+        }
+      })
     } catch {
-      setOrbState('idle')
       const err = { role: 'assistant', content: '抱歉，出错了。', pinyin: 'Bàoqiàn, chū cuò le.', translation: 'Sorry, an error.' }
       setMessages([...updated, err])
       setLastReply(err)
+      if (continuousRef.current) startWebSpeech()
+      else setOrbState('idle')
     }
   }
 
   const handleMicClick = () => {
-    if (orbState === 'listening') stopListening()
-    else if (orbState === 'idle') startListening()
-    // do nothing if thinking/speaking
+    if (continuousRef.current) {
+      stopListening()
+    } else if (orbState === 'idle') {
+      startListening()
+    }
+    // if not continuous and thinking/speaking, do nothing
   }
 
   const stateLabel = {
@@ -173,31 +206,22 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
 
   return (
     <div className="talk-mode">
-      {/* Ambient floating particles */}
       {[...Array(8)].map((_, i) => (
         <div key={i} className="talk-particle" style={{ '--i': i }} />
       ))}
 
       <div className="orb-container">
-        {/* Bloom glow behind orb */}
         <div className={`orb-bloom orb-bloom-${orbState}`} />
 
         <div className={`orb orb-${orbState}`} onClick={handleMicClick}>
-          {/* Outer dashed ring — slow spin */}
           <div className="orb-ring orb-ring-1" />
-          {/* Middle solid ring — counter spin */}
           <div className="orb-ring orb-ring-2" />
-          {/* Conic sweep ring — radar/scanner */}
           <div className="orb-ring orb-ring-3" />
-
-          {/* Audio frequency dots around the orb */}
           <div className="orb-dots">
             {[...Array(16)].map((_, i) => (
               <div key={i} className="orb-dot" style={{ '--i': i }} />
             ))}
           </div>
-
-          {/* Core sphere with shine */}
           <div className="orb-core">
             <div className="orb-core-shine" />
             <span className="orb-char">宝</span>
@@ -205,6 +229,9 @@ export default function TalkMode({ scenario, difficulty, messages, setMessages, 
         </div>
 
         <p className={`orb-status-label orb-status-${orbState}`}>{stateLabel[orbState]}</p>
+        {continuous && orbState !== 'listening' && (
+          <p className="orb-session-hint">Session active · tap orb to stop</p>
+        )}
         {transcript && <p className="orb-interim">{transcript}</p>}
       </div>
 
