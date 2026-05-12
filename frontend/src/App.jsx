@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, Component } from 'react'
 import ChatMode from './components/ChatMode'
 import TalkMode from './components/TalkMode'
 import LearningPanel from './components/LearningPanel'
@@ -46,8 +46,14 @@ export default function App() {
     setLearning((prev) => ({
       topic: data.topic || prev.topic,
       vocab: mergeUnique(prev.vocab, data.new_words || [], 'word'),
-      goodUsage: [...prev.goodUsage, ...(data.good_usage || [])],
-      corrections: [...prev.corrections, ...(data.corrections || [])],
+      goodUsage: [
+        ...prev.goodUsage,
+        ...(data.good_usage || []).map((g) => (typeof g === 'string' ? g : g?.phrase || g?.text || JSON.stringify(g))),
+      ],
+      corrections: [
+        ...prev.corrections,
+        ...(data.corrections || []).filter((c) => c && typeof c === 'object'),
+      ],
     }))
   }, [])
 
@@ -176,4 +182,20 @@ export default function App() {
 function mergeUnique(existing, incoming, key) {
   const seen = new Set(existing.map((x) => x[key]))
   return [...existing, ...incoming.filter((x) => !seen.has(x[key]))]
+}
+
+export class ErrorBoundary extends Component {
+  state = { crashed: false }
+  static getDerivedStateFromError() { return { crashed: true } }
+  render() {
+    if (this.state.crashed) return (
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', gap:'1rem', color:'#94a3b8' }}>
+        <p style={{ fontSize:'1.1rem' }}>Something went wrong. Please refresh the page.</p>
+        <button onClick={() => window.location.reload()} style={{ padding:'0.5rem 1.2rem', borderRadius:'8px', background:'#f97316', color:'white', border:'none', cursor:'pointer', fontSize:'0.9rem' }}>
+          Refresh
+        </button>
+      </div>
+    )
+    return this.props.children
+  }
 }
