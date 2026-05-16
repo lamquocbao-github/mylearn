@@ -2,6 +2,54 @@ export default function ReviewModal({ learning, messages, onClose, onReset }) {
   const { topic, vocab, goodUsage, corrections } = learning
   const userMessages = messages.filter((m) => m.role === 'user').length
 
+  const downloadReview = () => {
+    const date = new Date().toLocaleString()
+    const lines = []
+
+    lines.push(`# MyLearn — Session Review`)
+    lines.push(`**Date:** ${date}`)
+    if (topic) lines.push(`**Topic:** ${topic}`)
+    lines.push(`**Messages:** ${userMessages} · **New Words:** ${vocab.length} · **Good Phrases:** ${goodUsage.length} · **Corrections:** ${corrections.length}`)
+    lines.push('')
+
+    if (vocab.length > 0) {
+      lines.push(`## Vocabulary Learned`)
+      vocab.forEach((w) => lines.push(`- **${w.word}** ${w.pinyin} — ${w.meaning}`))
+      lines.push('')
+    }
+
+    if (goodUsage.length > 0) {
+      lines.push(`## What You Did Well`)
+      goodUsage.forEach((g) => lines.push(`- ${g}`))
+      lines.push('')
+    }
+
+    if (corrections.length > 0) {
+      lines.push(`## Corrections to Remember`)
+      corrections.forEach((c) => lines.push(`- ~~${c.original}~~ → **${c.corrected}** — ${c.explanation}`))
+      lines.push('')
+    }
+
+    if (messages.length > 0) {
+      lines.push(`## Conversation`)
+      messages.forEach((m) => {
+        const speaker = m.role === 'user' ? 'You' : 'Baobei'
+        lines.push(`**${speaker}:** ${m.content}`)
+        if (m.role === 'assistant' && m.pinyin) lines.push(`*${m.pinyin}*`)
+        if (m.role === 'assistant' && m.translation) lines.push(`> ${m.translation}`)
+        lines.push('')
+      })
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mylearn-review-${new Date().toISOString().slice(0, 10)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -88,6 +136,7 @@ export default function ReviewModal({ learning, messages, onClose, onReset }) {
 
         <div className="modal-footer">
           <button className="modal-btn-secondary" onClick={onClose}>Keep Talking</button>
+          <button className="modal-btn-download" onClick={downloadReview}>Download Review</button>
           <button className="modal-btn-primary" onClick={onReset}>New Conversation</button>
         </div>
       </div>

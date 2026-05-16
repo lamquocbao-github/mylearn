@@ -479,6 +479,12 @@ input, select { font-family: inherit; }
   transition: all 0.15s;
 }
 .modal-btn-secondary:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+.modal-btn-download {
+  padding: 0.55rem 1.25rem; border-radius: 10px; font-size: 0.88rem; font-weight: 600;
+  color: #fb923c; background: rgba(249,115,22,0.1);
+  border: 1px solid rgba(249,115,22,0.3); transition: all 0.15s;
+}
+.modal-btn-download:hover { background: rgba(249,115,22,0.2); }
 .modal-btn-primary {
   padding: 0.55rem 1.25rem; border-radius: 10px; font-size: 0.88rem; font-weight: 600;
   background: #f97316; color: white; transition: background 0.15s;
