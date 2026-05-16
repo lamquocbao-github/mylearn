@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
 from groq import AsyncGroq
+from openai import AsyncOpenAI
 import sqlite3
 import json
 import os
@@ -27,13 +28,27 @@ app.add_middleware(
 # --- Gemini setup ---
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-# --- Groq setup (optional fallback) ---
+# --- Groq setup (fallback) ---
 groq_client: AsyncGroq | None = None
 if os.environ.get("GROQ_API_KEY"):
     groq_client = AsyncGroq(api_key=os.environ["GROQ_API_KEY"])
 
-# Fallback chain: try these Groq models in order if Gemini fails
 GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+
+# --- OpenRouter setup (fallback, Chinese-native models) ---
+openrouter_client: AsyncOpenAI | None = None
+if os.environ.get("OPENROUTER_API_KEY"):
+    openrouter_client = AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ["OPENROUTER_API_KEY"],
+    )
+
+# All free; try in order — DeepSeek → Qwen → GLM (all Chinese-native)
+OPENROUTER_MODELS = [
+    "deepseek/deepseek-v4-flash:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "z-ai/glm-4.5-air:free",
+]
 
 SYSTEM_PROMPT = """You are Baobei (宝贝), a warm, curious, and engaging Mandarin Chinese conversation partner. Your goal is to have a genuine two-sided conversation that helps the user practice Mandarin naturally — not just answer questions, but drive the exchange forward like a real friend would.
 
@@ -259,22 +274,37 @@ async def chat(req: ChatRequest):
     except Exception as e:
         errors.append(f"Gemini: {e}")
 
-    # --- Fallback: Groq (llama-3.3-70b → llama-3.1-8b) ---
-    if result is None and groq_client:
-        # Convert Gemini-style history to OpenAI-compatible format
-        groq_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for h in history:
-            groq_messages.append({
-                "role": "assistant" if h["role"] == "model" else "user",
-                "content": h["parts"][0],
-            })
-        groq_messages.append({"role": "user", "content": full_message})
+    # Build OpenAI-compatible messages once — shared by OpenRouter and Groq fallbacks
+    compat_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for h in history:
+        compat_messages.append({
+            "role": "assistant" if h["role"] == "model" else "user",
+            "content": h["parts"][0],
+        })
+    compat_messages.append({"role": "user", "content": full_message})
 
+    # --- Fallback 1: OpenRouter (DeepSeek → Qwen → GLM, all Chinese-native, all free) ---
+    if result is None and openrouter_client:
+        for or_model in OPENROUTER_MODELS:
+            try:
+                resp = await openrouter_client.chat.completions.create(
+                    model=or_model,
+                    messages=compat_messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
+                )
+                result = json.loads(resp.choices[0].message.content)
+                break
+            except Exception as e:
+                errors.append(f"OpenRouter/{or_model}: {e}")
+
+    # --- Fallback 2: Groq (llama-3.3-70b → llama-3.1-8b → mixtral) ---
+    if result is None and groq_client:
         for groq_model in GROQ_MODELS:
             try:
                 resp = await groq_client.chat.completions.create(
                     model=groq_model,
-                    messages=groq_messages,
+                    messages=compat_messages,
                     response_format={"type": "json_object"},
                     temperature=0.7,
                 )
