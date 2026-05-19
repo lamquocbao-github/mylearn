@@ -43,10 +43,10 @@ if os.environ.get("OPENROUTER_API_KEY"):
         api_key=os.environ["OPENROUTER_API_KEY"],
     )
 
-# All free; try in order — DeepSeek → Qwen → GLM (all Chinese-native)
+# DeepSeek (free) → Qwen flash (near-free) → GLM 4.5 air (free), all Chinese-native
 OPENROUTER_MODELS = [
     "deepseek/deepseek-v4-flash:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "qwen/qwen3.5-flash-20260224",
     "z-ai/glm-4.5-air:free",
 ]
 
@@ -283,7 +283,7 @@ async def chat(req: ChatRequest):
         })
     compat_messages.append({"role": "user", "content": full_message})
 
-    # --- Fallback 1: OpenRouter (DeepSeek → Qwen → GLM, all Chinese-native, all free) ---
+    # --- Fallback 1: OpenRouter (DeepSeek free → Qwen flash → GLM 5 turbo, Chinese-native) ---
     if result is None and openrouter_client:
         for or_model in OPENROUTER_MODELS:
             try:
