@@ -46,7 +46,7 @@ if os.environ.get("OPENROUTER_API_KEY"):
 # DeepSeek (free) → Qwen flash (near-free) → GLM 4.5 air (free), all Chinese-native
 OPENROUTER_MODELS = [
     "deepseek/deepseek-v4-flash:free",
-    "qwen/qwen3.5-flash-20260224",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
     "z-ai/glm-4.5-air:free",
 ]
 
